@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from skimage.feature import hog
 from sklearn.utils import shuffle
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.model_selection import train_test_split
 from sklearn.svm import SVC
 
 
@@ -129,7 +129,7 @@ class TrainingData():
 
     def get_random_training_images(self, label=None, number=1):
         """Return a random sample of the training images currently loaded."""
-        label = self.training_set.keys()[0] if label is None else label
+        label = list(self.training_set.keys())[0] if label is None else label
         training_images = self.training_set[label]
         return [random.choice(training_images) for i in range(0, number)]
 
@@ -143,8 +143,8 @@ class TrainingData():
 
         Parameters
         ----------
-        test_fraction: float, The fraction of the data set that should be allocated
-        to the test set. It must be a value between 0.0 and 1.0.
+        test_fraction: float, The fraction of the data set that should be
+        allocated to the test set. It must be a value between 0.0 and 1.0.
 
         Returns
         ----------
@@ -163,73 +163,75 @@ class TrainingData():
         return train_test_split(features, labels, test_size=test_fraction)
 
 class GridSearch():
-    def __init__(self, search_windows, search_areas):
+    def __init__(self, search_windows, search_areas, block_size=10):
         self.search_windows = search_windows
         self.search_areas = search_areas
+        self.block_size = block_size
 
     def crawl_img(self, img, window_size, step_x, step_y, callback_fun):
         """Calls a function for each step while crawling over the input image.
 
-        The input image is sampled based on the supplied search window parameters
-        and the supplied callback function is applied for each step.
+        The input image is sampled based on the supplied search window
+        parameters and the supplied callback function is applied for each step.
 
         Returns
         --------
         dict: Containing two entries - 'position' with the search window
-        position, 'output' with the result from what the callback function returns
-        for each step.
+        position, 'output' with the result from what the callback function
+        returns for each step.
         """
         print("Searching")
 
 
 class Classifier():
     """Base class for the ML models to identify cars."""
+    def __init__(self, classifier):
+        self.clf = classifier
+        self.feature_scaler = None
+
     def __call__(self):
-        self.clf = None
         raise NotImplementedError
 
-    #@Classmethod
-    # Train
     def train(self, features, labels):
         """Trains the classifier with the supplied training data."""
+        features = self.normalise(features)
         self.clf.fit(features, labels)
 
-    # Predict
     def predict(self, features):
         """Predicts the labels for a given list of input features."""
-        features = normalise(features)
+        features = self.normalise(features)
         self.clf.predict(features)
 
-    # Normalise
     def normalise(self, features):
         """Normalises the input feature set. """
-        X = np.vstack(feature_list).astype(np.float64)
-        
-        # Fit a per-column scaler
-        X_scaler = StandardScaler().fit(X)
-        # Apply the scaler to X
-        scaled_X = X_scaler.transform(X)
+        features = np.vstack(features).astype('float64')
 
+        if self.feature_scaler is None:
+            raise ValueError('The feature scaler has not yet been fit!')
+        else:
+            return self.feature_scaler.transform(features)
 
+    def fit_feature_scaler(self, training_features):
+        """Fit a feature scaler to the training data to easily normalise inputs
+        later.
+        """
+        training_features = np.vstack(training_features).astype('float64')
+        self.feature_scaler = StandardScaler().fit(training_features)
 
-class ClassifierSVM(Classifier):
-    """A support Vector Machine (SVM) based car classifier."""
-    def __init__(self, params=None):
+    @classmethod
+    def svm(cls, params=None):
+        """Set up a support vector machine classifier."""
         if params is None:
             params = {'C': 1.0,
                       'kernel': 'rbf',
                       'max_iter': -1}
-        self.clf = SVC(**params)
-
-        
+        return cls(SVC(**params))
 
 
 
 #-----------------------------------------------------------------------------#
 #                           Utility functions
 #-----------------------------------------------------------------------------#
-
-
 
 def import_image(image_path):
     """Import an image from the supplied path.
@@ -260,8 +262,8 @@ def compare_images(img_org, img_undist):
 
 
 def overlay_image(img, overlay_img, opacity=1.0):
-    """Reliably combine two images based on the opacity. Black pixels are treated as transparent.
-    The method also takes in a grayscale base image.
+    """Reliably combine two images based on the opacity. Black pixels are
+    treated as transparent. The method also takes in a grayscale base image.
     """
     if len(img.shape) < 3:
         img = np.stack((img, img, img), axis=-1)
