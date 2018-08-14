@@ -3,12 +3,13 @@
 
 import os
 import random
+import time
 import numpy as np
 import cv2
-import time
 import matplotlib.pyplot as plt
 from skimage.feature import hog
 from sklearn.utils import shuffle
+from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.svm import SVC
@@ -212,9 +213,9 @@ class TrainingData():
         features = []
         labels = []
 
-        for label, images in self.training_set.items():
-            features.extend(images)
-            labels.extend([label for image in images])
+        for label, feature_vectors in self.training_set_features.items():
+            features.extend(feature_vectors)
+            labels.extend([label for feature_vector in feature_vectors])
 
         labels, features = shuffle((labels, features))
         return train_test_split(features, labels, test_size=test_fraction)
@@ -257,7 +258,7 @@ class Classifier():
     def predict(self, features):
         """Predicts the labels for a given list of input features."""
         features = self.normalise(features)
-        self.clf.predict(features)
+        return self.clf.predict(features)
 
     def normalise(self, features):
         """Normalises the input feature set. """
