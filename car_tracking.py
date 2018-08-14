@@ -5,6 +5,7 @@ import os
 import random
 import numpy as np
 import cv2
+import time
 import matplotlib.pyplot as plt
 from skimage.feature import hog
 from sklearn.utils import shuffle
@@ -12,42 +13,52 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.svm import SVC
 
-
-
 class ImageFrame():
     """Holds all of the information related to the current image frame under
     consideration and the respective methods to analyse and modify the image.
     """
-    def __init__(self, image, frame_name='Current Frame'):
-        self.image = image
-        self.frame_name = frame_name
-        self.hog_params = {'orientations': 9,
-                           'pix_per_cell': 8,
-                           'cell_per_block': 2}
+    def __init__(self, area_of_interest, hog_parameters):
+        self.colorspace = 'HLS'
+        self.image = None
+        self.hog_params = hog_parameters
         self.hog_features = None
-        self.search_area = ((0, 0), (1, 1))
+        self.hog_image = None
+        self.search_area = area_of_interest
+        self.color_bins = None
+        self.color_bin_image = None
 
-    def __call__(self, image, frame_name='Current Frame'):
+    def __call__(self, image):
         # Clear all variables dependent on the image
-        self.image = image
-        self.frame_name = frame_name
-        self.hog_features = self.extract_hog_features()
+        converter = getattr(cv2, "COLOR_RGB2" + self.colorspace)
+        self.image = cv2.cvtColor(image, converter)
+
+        cell_size = self.hog_params['pix_per_cell']
+        bin_size = int(cell_size/2)
+        self.color_bins, self.color_bin_image = \
+                                        self.extract_colour_bins(bin_size)
+
+        try:
+            self.hog_features, self.hog_image = \
+                                                self.extract_hog_features()
+        except:
+            try:
+                self.hog_features = self.extract_hog_features()
+            except ValueError:
+                print('HOG feature extraction returned too many values.')
 
     def display_frame(self, title=''):
         """Plot the currently loaded image frame in the car tracker."""
         if self.image is not None:
             plot_image(self.image, title=title)
 
-    def save_frame(self, output_folder='./output_images/'):
+    def save_frame(self, output_folder='./output_images/',
+                   frame_name='Current_Frame'):
         """Save the currently loaded image frame to a file."""
-        if self.frame_name is None:
-            name = 'No_frame_name__'
-        else:
-            name = self.frame_name
-
+        name = frame_name
         save_path = os.path.join(output_folder, name) + '.jpg'
         if self.image is not None:
-            cv2.imwrite(save_path, cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB))
+            converter = getattr(cv2, "COLOR_" + self.colorspace + "2RGB")
+            cv2.imwrite(save_path, cv2.cvtColor(self.image, converter))
         else:
             print('No frame available for export!')
 
@@ -56,15 +67,23 @@ class ImageFrame():
         interest of the current image frame.
         """
         img = self.get_area_of_interest()
-
         orient = self.hog_params['orientations']
         pix_per_cell = self.hog_params['pix_per_cell']
         cell_per_block = self.hog_params['cell_per_block']
-        return hog(img,
+        visualise = self.hog_params['visualise']
+
+        return hog(img[:, :, 1],
                    orientations=orient,
                    pixels_per_cell=(pix_per_cell, pix_per_cell),
                    cells_per_block=(cell_per_block, cell_per_block),
-                   visualise=False, feature_vector=False)
+                   visualise=visualise, block_norm='L2-Hys')
+
+    def extract_colour_bins(self, bin_size):
+        """Extract the colour bins from the image based on the cell size."""
+        img = self.image
+        new_size = (int(img.shape[0]/bin_size), int(img.shape[1]/bin_size))
+        result = cv2.resize(self.image, new_size)
+        return result.ravel(), result
 
     def get_hog_features(self):
         """Returns the Histogram of Oriented Gradients """
@@ -72,17 +91,39 @@ class ImageFrame():
             raise ValueError('There are no HOG features available.')
         else:
             return self.hog_features
+    
+    def get_color_bin_features(self):
+        """Returns the Histogram of Oriented Gradients """
+        if self.color_bins is None:
+            raise ValueError('There are no HOG features available.')
+        else:
+            return self.color_bins
+
+    def get_hog_visualisation(self):
+        """Returns the Histogram of Oriented Gradients """
+        if self.hog_image is None:
+            raise ValueError('There is no HOG visualisation available.')
+        else:
+            return self.hog_image
+
+    def get_colour_bin_visualisation(self):
+        """Extract the colour bins from the image based on the cell size."""
+        if self.color_bins is None:
+            raise ValueError('There are no colour bin features available.')
+        else:
+            converter = getattr(cv2, "COLOR_" + self.colorspace + "2RGB")
+            return cv2.cvtColor(self.color_bin_image, converter)
 
     def get_area_of_interest(self):
         """Reduces the image to the area of interest."""
         img_h = self.image.shape[0]
         img_w = self.image.shape[1]
-        top = int(self.search_area[0][0] * img_h)
-        bottom = int(self.search_area[0][0] * img_h)
+        top = int(self.search_area[0][1] * img_h)
+        bottom = int(self.search_area[1][1] * img_h)
         left = int(self.search_area[0][0] * img_w)
-        right = int(self.search_area[0][0] * img_w)
+        right = int(self.search_area[1][0] * img_w)
 
-        return self.image[left:right, top:bottom, :]
+        return self.image[top:bottom, left:right, :]
 
 
 class TrainingData():
@@ -91,6 +132,7 @@ class TrainingData():
     def __init__(self, training_data_path):
         self.img_extensions = ['png', 'jpg', 'jpeg']
         self.training_set = self.import_training_data(training_data_path)
+        self.training_set_features = None
 
     def import_training_data(self, data_path):
         """Import the training data from a given input path. Assuming that
@@ -133,6 +175,22 @@ class TrainingData():
         training_images = self.training_set[label]
         return [random.choice(training_images) for i in range(0, number)]
 
+    def extract_features(self, image_frame):
+        """Extracts image features from all elements in the data set."""
+        self.training_set_features = {}
+        for label, images in self.training_set.items():
+            start = time.time()
+            self.training_set_features[label] = []
+            for image in images:
+                image_frame(image)
+                hog_features = image_frame.get_hog_features()
+                color_features = image_frame.get_color_bin_features()
+                self.training_set_features[label].append(
+                                np.concatenate((hog_features, color_features)))
+            end = time.time()
+            print('Extracted feature vectors from images labelled as ' \
+                + label + ' in', end - start, 'sec.')
+
     @staticmethod
     def get_extension(filename):
         """Isolates the filetype from file name."""
@@ -159,7 +217,6 @@ class TrainingData():
             labels.extend([label for image in images])
 
         labels, features = shuffle((labels, features))
-
         return train_test_split(features, labels, test_size=test_fraction)
 
 class GridSearch():
@@ -252,13 +309,16 @@ def plot_image(img, title=''):
     plt.title(title, fontsize=20)
 
 
-def compare_images(img_org, img_undist):
+def compare_images(img_org, img_undist, titles=None):
     """Display an image comparison in a subplot."""
-    plt.subplots(1, 2, figsize=(20, 10), dpi=150)
+    if titles is None:
+        titles = ('Image Before', 'Image After')
+    
+    plt.subplots(1, 2, figsize=(10, 5), dpi=80)
     plt.subplot(1, 2, 1)
-    plot_image(img_org, 'Image Before')
+    plot_image(img_org, titles[0])
     plt.subplot(1, 2, 2)
-    plot_image(img_undist, 'Image After')
+    plot_image(img_undist, titles[1])
 
 
 def overlay_image(img, overlay_img, opacity=1.0):
@@ -280,3 +340,39 @@ def overlay_image(img, overlay_img, opacity=1.0):
         img_out[:, :, i] = np.where(channel_out > 255, 255, channel_out)
 
     return img_out.astype('uint8')
+
+def quick_rectangle(img, corners, color='green', opacity=0.9, 
+                    thickness=4, filled=False):
+    """Draws a rectangle on the input image."""
+    colors = {'green': (30, 255, 120),
+              'blue': (20, 104, 229),
+              'red': (224, 52, 0),
+              'orange': (252, 163, 9),
+              'yellow': (252, 228, 10)}
+
+    if color.lower() not in colors:
+        color = 'green'
+        print('Warning unknown color, using green instead.  Please choose from:\
+              green, blue, red, orange and yellow.')
+    else:
+        color = color.lower()
+    
+    thickness = int(thickness)
+
+    outline = np.zeros(img.shape)
+
+    width = img.shape[1]
+    height = img.shape[0]
+    corners = (corners * np.array([width, height])).astype(int)
+    corners = tuple(map(tuple, corners))
+
+    outline = cv2.rectangle(outline, corners[0], corners[1], colors[color],
+                            thickness=thickness)
+
+    if filled:
+        fill = np.zeros(img.shape)
+        fill = cv2.rectangle(fill, corners[0], corners[1], colors[color],
+                             thickness=-1)
+        img = overlay_image(img, fill, opacity=opacity*0.3)
+
+    return overlay_image(img, outline, opacity=opacity)
