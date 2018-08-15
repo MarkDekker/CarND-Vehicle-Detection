@@ -4,6 +4,7 @@
 import os
 import random
 import time
+import math
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
@@ -12,19 +13,18 @@ from sklearn.utils import shuffle
 from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
-from sklearn.svm import SVC
+from sklearn.svm import SVC, LinearSVC
 
 class ImageFrame():
     """Holds all of the information related to the current image frame under
     consideration and the respective methods to analyse and modify the image.
     """
-    def __init__(self, area_of_interest, hog_parameters):
+    def __init__(self, hog_parameters):
         self.colorspace = 'HLS'
         self.image = None
         self.hog_params = hog_parameters
         self.hog_features = None
         self.hog_image = None
-        self.search_area = area_of_interest
         self.color_bins = None
         self.color_bin_image = None
 
@@ -67,7 +67,7 @@ class ImageFrame():
         """Extract the "Histogram of Oriented Gradients" for the region of
         interest of the current image frame.
         """
-        img = self.get_area_of_interest()
+        img = self.image
         orient = self.hog_params['orientations']
         pix_per_cell = self.hog_params['pix_per_cell']
         cell_per_block = self.hog_params['cell_per_block']
@@ -107,6 +107,13 @@ class ImageFrame():
         else:
             return self.hog_image
 
+    def get_image(self):
+        """Returns the Histogram of Oriented Gradients """
+        if self.image is None:
+            raise ValueError('There is no image available.')
+        else:
+            return self.image
+
     def get_colour_bin_visualisation(self):
         """Extract the colour bins from the image based on the cell size."""
         if self.color_bins is None:
@@ -114,17 +121,6 @@ class ImageFrame():
         else:
             converter = getattr(cv2, "COLOR_" + self.colorspace + "2RGB")
             return cv2.cvtColor(self.color_bin_image, converter)
-
-    def get_area_of_interest(self):
-        """Reduces the image to the area of interest."""
-        img_h = self.image.shape[0]
-        img_w = self.image.shape[1]
-        top = int(self.search_area[0][1] * img_h)
-        bottom = int(self.search_area[1][1] * img_h)
-        left = int(self.search_area[0][0] * img_w)
-        right = int(self.search_area[1][0] * img_w)
-
-        return self.image[top:bottom, left:right, :]
 
 
 class TrainingData():
@@ -220,26 +216,6 @@ class TrainingData():
         labels, features = shuffle((labels, features))
         return train_test_split(features, labels, test_size=test_fraction)
 
-class GridSearch():
-    def __init__(self, search_windows, search_areas, block_size=10):
-        self.search_windows = search_windows
-        self.search_areas = search_areas
-        self.block_size = block_size
-
-    def crawl_img(self, img, window_size, step_x, step_y, callback_fun):
-        """Calls a function for each step while crawling over the input image.
-
-        The input image is sampled based on the supplied search window
-        parameters and the supplied callback function is applied for each step.
-
-        Returns
-        --------
-        dict: Containing two entries - 'position' with the search window
-        position, 'output' with the result from what the callback function
-        returns for each step.
-        """
-        print("Searching")
-
 
 class Classifier():
     """Base class for the ML models to identify cars."""
@@ -284,12 +260,170 @@ class Classifier():
                       'kernel': 'rbf',
                       'max_iter': -1}
         return cls(SVC(**params))
+    
+    @classmethod
+    def svm_linear(cls, params=None):
+        """Set up a linear support vector machine classifier."""
+        if params is None:
+            params = {'C': 1.0,
+                      'dual': 'false',
+                      'max_iter': -1}
+        return cls(LinearSVC(**params))
 
+
+class GridSearch():
+    """Tool to search and image with a sliding window approach."""
+    def __init__(self, search_windows, search_areas, hog_params,
+                 training_resolution=64):
+        self.search_areas = search_areas
+        self.search_windows = self.process_windows(search_windows)
+        self.frame = ImageFrame(hog_params)
+        self.training_res = training_resolution
+        self.crawl_result = None
+
+    def process_windows(self, search_windows):
+        """Resizes the steps to ensure consistency with the search area."""
+
+        total_steps = 0
+
+        for name, window in search_windows.items():
+            area = self.search_areas[window['search_area']]
+            area_width = (area[1][0] - area[0][0])
+            area_height = (area[1][1] - area[0][1])
+
+            steps_x = int(math.ceil((area_width - window['size'][0])
+                          / window['step_x']))
+            window['step_x'] = int(math.ceil((area_width - window['size'][0])
+                                   / steps_x))
+            steps_y = int(math.ceil((area_height - window['size'][1])
+                          / window['step_y']))
+            window['step_y'] = int(math.ceil((area_height - window['size'][1])
+                                   / steps_y))
+
+            search_windows[name] = window
+            total_steps += (steps_x) * (steps_y)
+
+        print('With the current search window and area setup, each frame ' + \
+              'will be sampled', total_steps, 'times.')
+        return search_windows
+
+    def get_window_position(self, step_number, window):
+        """Get the absolute position of the window based on the step number as
+        a fraction of the image dimensions
+        """
+        top = self.search_areas[window['search-area']][0][1]
+        left = self.search_areas[window['search-area']][0][0]
+        area = self.search_areas[window['search_area']]
+        area_width = (area[0][0] - area[1][0])
+
+        steps_x = int(area_width / window['step_x'])
+
+        top_offset = int(step_number / steps_x) * window['step_y']
+        left_offset = int(step_number % steps_x) * window['step_x']
+
+        return (left + left_offset), (top + top_offset)
+
+    def set_frame_image(self, img):
+        """Update the image frames with the supplied image."""
+        if self.frame is None:
+            raise ValueError('No image frame objects exist.')
+        else:
+            std_size = (self.training_res, self.training_res)
+            img = cv2.resize(img, std_size)
+            return self.frame(img)
+
+    def crawl_image(self, img, classifier, highlight=True):
+        """Calls a function for each step while crawling over the input image.
+
+        The input image is sampled based on the supplied search window
+        parameters and the supplied callback function is applied for each step.
+
+        Returns
+        --------
+        dict: Containing two entries - 'position' with the search window
+        position, 'output' with the result from what the callback function
+        returns for each step.
+        """
+        search_result = []
+        
+        for name, window in self.search_windows.items():
+            lowest = self.search_areas[window['search_area']][1][1]
+            rightmost = self.search_areas[window['search_area']][1][0]
+            top = self.search_areas[window['search_area']][0][1]
+            bottom = top + window['step_y']
+            right = 0
+
+            while bottom < lowest - 1:
+                left = self.search_areas[window['search_area']][0][0]
+                while right < rightmost - 1:
+                    left += min(window['step_x'], rightmost - right)
+                    right = left + window['size'][0]
+
+                    window_area = ((left, top), (right, bottom))
+                    window_img = get_area_of_interest(img, window_area)
+                    self.set_frame_image(window_img)
+                    frame = self.frame
+                    features = [np.concatenate((frame.get_hog_features(),
+                                                frame.get_color_bin_features()))]
+
+                    search = {}
+                    search['position'] = (left, top)
+                    search['window'] = name
+                    search['label'] = classifier.predict(features)[0]
+
+                    search_result.append(search)
+
+                right = 0
+                top += min(window['step_y'], lowest - bottom)
+                bottom = top + window['size'][1]
+            print(name, bottom, lowest)
+
+
+        if highlight:
+            highlighted_cars = self.highlight_labels(img, search_result,
+                                                     'vehicles')
+            return search_result, highlighted_cars
+        else:
+            return search_result
+
+    def highlight_labels(self, img, search_result, target_label,
+                         color='yellow'):
+        """Draws a rectangle around windows which detected a given label."""
+        annotated_img = np.copy(img)
+        for step in search_result:
+            if step['label'] == target_label:
+                window_area = self.get_window_area(step['position'],
+                                                   step['window'])
+                annotated_img = quick_rectangle(annotated_img, window_area,
+                                                color=color, opacity=0.4,
+                                                filled=True, thickness=2)
+
+        return annotated_img
+
+    def get_window_area(self, top_left_crnr, window_name):
+        """Returns the  coordinates of the search window in pixels."""
+        height = self.search_windows[window_name]['size'][1]
+        width = self.search_windows[window_name]['size'][0]
+        left = top_left_crnr[0]
+        top = top_left_crnr[1]
+        right = left + width
+        bottom = top + height
+
+        return (top_left_crnr, (right, bottom))
 
 
 #-----------------------------------------------------------------------------#
 #                           Utility functions
 #-----------------------------------------------------------------------------#
+
+def get_area_of_interest(image, search_area):
+    """Reduces the image to the area of interest."""
+    top = search_area[0][1]
+    bottom = search_area[1][1]
+    left = search_area[0][0]
+    right = search_area[1][0]
+
+    return image[top:bottom, left:right, :]
 
 def import_image(image_path):
     """Import an image from the supplied path.
@@ -314,7 +448,7 @@ def compare_images(img_org, img_undist, titles=None):
     """Display an image comparison in a subplot."""
     if titles is None:
         titles = ('Image Before', 'Image After')
-    
+
     plt.subplots(1, 2, figsize=(10, 5), dpi=80)
     plt.subplot(1, 2, 1)
     plot_image(img_org, titles[0])
@@ -357,16 +491,10 @@ def quick_rectangle(img, corners, color='green', opacity=0.9,
               green, blue, red, orange and yellow.')
     else:
         color = color.lower()
-    
+
     thickness = int(thickness)
-
     outline = np.zeros(img.shape)
-
-    width = img.shape[1]
-    height = img.shape[0]
-    corners = (corners * np.array([width, height])).astype(int)
     corners = tuple(map(tuple, corners))
-
     outline = cv2.rectangle(outline, corners[0], corners[1], colors[color],
                             thickness=thickness)
 
