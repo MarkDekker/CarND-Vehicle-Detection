@@ -80,7 +80,7 @@ class GridSearch():
         """Converts coordinates expressed in cells to pixels."""
         converted = []
         for entry in coordinates:
-            if isinstance(entry) is list or isinstance(entry) is tuple:
+            if isinstance(entry, list) or isinstance(entry, tuple):
                 converted_entry = self.convert_to_px(entry)
             else:
                 converted_entry = entry * self.pix_in_cell

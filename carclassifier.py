@@ -62,5 +62,6 @@ class Classifier():
         """Set up a linear support vector machine classifier."""
         if params is None:
             params = {'C': 1.0,
-                      'max_iter': -1}
-        return cls(LinearSVC())
+                      'dual': True}
+        return cls(LinearSVC(**params))
+

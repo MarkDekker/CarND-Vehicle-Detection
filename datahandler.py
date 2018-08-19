@@ -57,7 +57,8 @@ class TrainingData():
         training_images = self.training_set[label]
         return [random.choice(training_images) for i in range(0, number)]
 
-    def extract_features(self, image_analyser):
+    def extract_features(self, image_analyser, hog_features=True, spatial=True,
+                         histograms=True):
         """Extracts image features from all elements in the data set."""
         self.training_set_features = {}
         for label, images in self.training_set.items():
@@ -65,7 +66,10 @@ class TrainingData():
             self.training_set_features[label] = []
             for image in images:
                 image_analyser(image)
-                features = image_analyser.get_image_features()
+                features = image_analyser.get_image_features(
+                                                    hog_features=hog_features,
+                                                    spatial=spatial,
+                                                    histograms=histograms)
                 self.training_set_features[label].append(features)
             end = time.time()
             print('Extracted feature vectors from images labelled as ' \

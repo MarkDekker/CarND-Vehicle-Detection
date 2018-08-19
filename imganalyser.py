@@ -128,7 +128,6 @@ class ImageAnalyser():
         features = np.array([])
         if hog_features:
             hog_features = self.get_hog_features(window).ravel()
-            #print(hog_features.shape)
             features = np.hstack((features, hog_features))
         if spatial:
             spatial_features = self.get_spatial_features(window).ravel()
