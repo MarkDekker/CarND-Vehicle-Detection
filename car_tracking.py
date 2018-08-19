@@ -411,8 +411,6 @@ class GridSearch():
             new_size = (int(img_new.shape[1] * scale_factor), 
                         int(img_new.shape[0] * scale_factor))
             img = cv2.resize(img_new, new_size)
-            plot_image(img)
-            plt.show()
 
             return self.image_analyser(img)
     
@@ -435,8 +433,6 @@ class GridSearch():
         for name, window in self.search_windows.items():
             n_steps = self.get_nsteps(window)
             self.update_image_analyser(img, window)
-
-            print(name)
 
             for step in range(n_steps):
                 position = self.get_window_position(step, window)
