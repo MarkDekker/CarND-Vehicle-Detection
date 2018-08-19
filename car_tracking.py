@@ -4,101 +4,167 @@
 import os
 import random
 import time
-import math
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 from skimage.feature import hog
-from sklearn.utils import shuffle
-from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.svm import SVC, LinearSVC
 
-class ImageFrame():
-    """Holds all of the information related to the current image frame under
+class ImageAnalyser():
+    """Holds all of the information related to the current image under
     consideration and the respective methods to analyse and modify the image.
     """
-    def __init__(self, hog_parameters):
-        self.colorspace = 'HLS'
+    def __init__(self, hog_parameters, spatial_size=(32, 32),
+                 histogram_bins=32, colorspace='RGB'):
+        self.colorspace = colorspace
         self.image = None
         self.hog_params = hog_parameters
         self.hog_features = None
         self.hog_image = None
-        self.color_bins = None
-        self.color_bin_image = None
+        self.spatial_size = spatial_size
+        self.histogram_bins = histogram_bins
 
     def __call__(self, image):
-        # Clear all variables dependent on the image
-        converter = getattr(cv2, "COLOR_RGB2" + self.colorspace)
-        self.image = cv2.cvtColor(image, converter)
-
-        cell_size = self.hog_params['pix_per_cell']
-        bin_size = int(cell_size/2)
-        self.color_bins, self.color_bin_image = \
-                                        self.extract_colour_bins(bin_size)
-
-        try:
+        self.set_image(image)
+        if self.hog_params['visualise']:
             self.hog_features, self.hog_image = \
                                                 self.extract_hog_features()
-        except:
-            try:
-                self.hog_features = self.extract_hog_features()
-            except ValueError:
-                print('HOG feature extraction returned too many values.')
-
-    def display_frame(self, title=''):
-        """Plot the currently loaded image frame in the car tracker."""
-        if self.image is not None:
-            plot_image(self.image, title=title)
-
-    def save_frame(self, output_folder='./output_images/',
-                   frame_name='Current_Frame'):
-        """Save the currently loaded image frame to a file."""
-        name = frame_name
-        save_path = os.path.join(output_folder, name) + '.jpg'
-        if self.image is not None:
-            converter = getattr(cv2, "COLOR_" + self.colorspace + "2RGB")
-            cv2.imwrite(save_path, cv2.cvtColor(self.image, converter))
         else:
-            print('No frame available for export!')
+            self.hog_features = self.extract_hog_features()
+
+    def set_image(self, image):
+        """Updates image in object and applies the preset colourspace."""
+        if self.colorspace != 'RGB':
+            converter = getattr(cv2, "COLOR_RGB2" + self.colorspace)
+            image = cv2.cvtColor(image, converter)
+        self.image = image
+
+    def change_colorspace(self, new_colorspace):
+        """Change the colorspace from RGB."""
+        image = self.image
+
+        old_colorspace = self.colorspace
+        possible_spaces = ['HSV', 'LUV', 'HLS', 'YUV', 'YCrCb']
+        if (new_colorspace in possible_spaces and
+                new_colorspace != old_colorspace):
+            converter = getattr(cv2, "COLOR_" + old_colorspace + "2"
+                                + new_colorspace)
+            self.colorspace = new_colorspace
+            self.image = cv2.cvtColor(image, converter)
 
     def extract_hog_features(self):
         """Extract the "Histogram of Oriented Gradients" for the region of
-        interest of the current image frame.
+        interest of the current image.
         """
         img = self.image
+        if self.colorspace != 'RGB':
+            converter = getattr(cv2, "COLOR_" + self.colorspace + "2RGB")
+            img = cv2.cvtColor(img, converter)
+        img = cv2.cvtColor(self.image, cv2.COLOR_RGB2GRAY)
         orient = self.hog_params['orientations']
         pix_per_cell = self.hog_params['pix_per_cell']
         cell_per_block = self.hog_params['cell_per_block']
         visualise = self.hog_params['visualise']
 
-        return hog(img[:, :, 1],
+        return hog(img,
                    orientations=orient,
                    pixels_per_cell=(pix_per_cell, pix_per_cell),
                    cells_per_block=(cell_per_block, cell_per_block),
-                   visualise=visualise, block_norm='L2-Hys')
+                   visualise=visualise, block_norm='L2-Hys',
+                   feature_vector=False)
 
-    def extract_colour_bins(self, bin_size):
-        """Extract the colour bins from the image based on the cell size."""
-        img = self.image
-        new_size = (int(img.shape[0]/bin_size), int(img.shape[1]/bin_size))
-        result = cv2.resize(self.image, new_size)
-        return result.ravel(), result
-
-    def get_hog_features(self):
+    def get_hog_features(self, window=None):
         """Returns the Histogram of Oriented Gradients """
         if self.hog_features is None:
             raise ValueError('There are no HOG features available.')
         else:
-            return self.hog_features
-    
-    def get_color_bin_features(self):
-        """Returns the Histogram of Oriented Gradients """
-        if self.color_bins is None:
-            raise ValueError('There are no HOG features available.')
+            if window is not None:
+                window_size = window[1][0] - window[0][0]
+                cells_block = self.hog_params['cell_per_block']
+                blocks_per_window = window_size - cells_block + 1
+                hog_sample = self.hog_features[window[0][1]: window[0][1]
+                                               + blocks_per_window,
+                                               window[1][1]: window[1][1]
+                                               + blocks_per_window]
+            else:
+                hog_sample = self.hog_features
+            
+            return hog_sample
+    def get_spatial_features(self, window=None):
+        """Returns spatially sorted bins of colour values. """
+        image_window = self.get_image_window(window)
+        return cv2.resize(image_window, self.spatial_size)
+
+    def get_histogram_features(self, window=None):
+        """Returns the colour value histogram for a window in an image."""
+        image_window = self.get_image_window(window)
+        bin_ranges = {'others': ((0, 256), (0, 255), (0, 255)),
+                      'HLS': ((0, 181), (0, 255), (0, 255)),
+                      'HSV': ((0, 181), (0, 255), (0, 255))}
+        bin_range = (bin_ranges[self.colorspace]
+                     if self.colorspace in bin_ranges
+                     else bin_ranges['others'])
+        histogram = []
+
+        for channel in range(image_window.shape[2]):
+            channel_hist = np.histogram(image_window[:, :, channel],
+                                        bins=self.histogram_bins,
+                                        range=bin_range[channel])[0].tolist()
+            histogram.append(channel_hist)
+
+        return np.array(histogram)
+
+    def get_image_window(self, window):
+        """Get the portion of an image defined by the window."""
+        if window is not None:
+            pix_per_cell = self.hog_params['pix_per_cell']
+            top = window[0][1] * pix_per_cell
+            #print(window)
+            bottom = window[1][1] * pix_per_cell
+            left = window[0][0] * pix_per_cell
+            right = window[1][0] * pix_per_cell
+            return self.image[top:bottom, left:right, :]
         else:
-            return self.color_bins
+            return self.image
+
+    def get_image_features(self, hog_features=True, spatial=True,
+                           histograms=True, window=None):
+        """Combines image features and returns these as a feature vector."""
+        features = np.array([])
+        if hog_features:
+            hog_features = self.get_hog_features(window).ravel()
+            #print(hog_features.shape)
+            features = np.hstack((features, hog_features))
+        if spatial:
+            spatial_features = self.get_spatial_features(window).ravel()
+            features = np.hstack((features, spatial_features))
+        if histograms:
+            histogram_features = self.get_histogram_features(window).ravel()
+            features = np.hstack((features, histogram_features))
+
+        return features
+
+    def get_image(self):
+        """Returns the Histogram of Oriented Gradients """
+        if self.image is None:
+            raise ValueError('There is no image available.')
+        else:
+            if self.colorspace != 'RGB':
+                converter = getattr(cv2, "COLOR_" + self.colorspace + "2RGB")
+                image = cv2.cvtColor(self.image, converter)
+            else:
+                image = self.image
+            return image
+
+    def get_spatial_visualisation(self, window=None):
+        """Extract the colour bins from the image based on the cell size."""
+        image = self.get_spatial_features(window)
+        if self.colorspace != 'RGB':
+            converter = getattr(cv2, "COLOR_" + self.colorspace + "2RGB")
+            image = cv2.cvtColor(image, converter)
+        return image
 
     def get_hog_visualisation(self):
         """Returns the Histogram of Oriented Gradients """
@@ -107,20 +173,17 @@ class ImageFrame():
         else:
             return self.hog_image
 
-    def get_image(self):
-        """Returns the Histogram of Oriented Gradients """
-        if self.image is None:
-            raise ValueError('There is no image available.')
+    def get_histogram_visualisation(self, window=None):
+        """Plot the histogram for the current window."""
+        hist = self.get_histogram_features(window).tolist()
+        if len(self.colorspace) == 5:
+            series_labels = [self.colorspace[0], self.colorspace[1:3], 
+                             self.colorspace[3:]]
         else:
-            return self.image
+            series_labels = [label for label in self.colorspace]
+        plot_histogram(hist, 'Colour Histogram', series_labels)
 
-    def get_colour_bin_visualisation(self):
-        """Extract the colour bins from the image based on the cell size."""
-        if self.color_bins is None:
-            raise ValueError('There are no colour bin features available.')
-        else:
-            converter = getattr(cv2, "COLOR_" + self.colorspace + "2RGB")
-            return cv2.cvtColor(self.color_bin_image, converter)
+
 
 
 class TrainingData():
@@ -172,26 +235,19 @@ class TrainingData():
         training_images = self.training_set[label]
         return [random.choice(training_images) for i in range(0, number)]
 
-    def extract_features(self, image_frame):
+    def extract_features(self, image_analyser):
         """Extracts image features from all elements in the data set."""
         self.training_set_features = {}
         for label, images in self.training_set.items():
             start = time.time()
             self.training_set_features[label] = []
             for image in images:
-                image_frame(image)
-                hog_features = image_frame.get_hog_features()
-                color_features = image_frame.get_color_bin_features()
-                self.training_set_features[label].append(
-                                np.concatenate((hog_features, color_features)))
+                image_analyser(image)
+                features = image_analyser.get_image_features()
+                self.training_set_features[label].append(features)
             end = time.time()
             print('Extracted feature vectors from images labelled as ' \
                 + label + ' in', end - start, 'sec.')
-
-    @staticmethod
-    def get_extension(filename):
-        """Isolates the filetype from file name."""
-        return filename.split('.')[-1]
 
     def get_data(self, test_fraction=0.25):
         """Returns the shuffled training data as lists.
@@ -213,8 +269,17 @@ class TrainingData():
             features.extend(feature_vectors)
             labels.extend([label for feature_vector in feature_vectors])
 
-        labels, features = shuffle((labels, features))
-        return train_test_split(features, labels, test_size=test_fraction)
+        rand_state = np.random.randint(0, 100)
+        test_train_set = train_test_split(features, labels,
+                                          test_size=test_fraction,
+                                          random_state=rand_state)
+        return (test_train_set[0], test_train_set[1],
+                test_train_set[2], test_train_set[3])
+
+    @staticmethod
+    def get_extension(filename):
+        """Isolates the filetype from file name."""
+        return filename.split('.')[-1]
 
 
 class Classifier():
@@ -226,10 +291,21 @@ class Classifier():
     def __call__(self):
         raise NotImplementedError
 
-    def train(self, features, labels):
+    def train(self, features_train, labels_train, features_test,
+              labels_test):
         """Trains the classifier with the supplied training data."""
-        features = self.normalise(features)
-        self.clf.fit(features, labels)
+        features_train = self.normalise(features_train)
+        features_test = self.normalise(features_test)
+        self.clf.fit(features_train, labels_train)
+
+        start = time.time()
+        test_set_accuracy = self.clf.score(features_test, labels_test)
+        self.predict(features_test)
+        end = time.time()
+
+        print('Classifier test accuracy = ',
+              round(test_set_accuracy, 4),
+              '(took', round(end - start, 2), 'seconds on', len(features_test),'entries)')
 
     def predict(self, features):
         """Predicts the labels for a given list of input features."""
@@ -238,8 +314,6 @@ class Classifier():
 
     def normalise(self, features):
         """Normalises the input feature set. """
-        features = np.vstack(features).astype('float64')
-
         if self.feature_scaler is None:
             raise ValueError('The feature scaler has not yet been fit!')
         else:
@@ -249,7 +323,6 @@ class Classifier():
         """Fit a feature scaler to the training data to easily normalise inputs
         later.
         """
-        training_features = np.vstack(training_features).astype('float64')
         self.feature_scaler = StandardScaler().fit(training_features)
 
     @classmethod
@@ -260,156 +333,163 @@ class Classifier():
                       'kernel': 'rbf',
                       'max_iter': -1}
         return cls(SVC(**params))
-    
+
     @classmethod
     def svm_linear(cls, params=None):
         """Set up a linear support vector machine classifier."""
         if params is None:
             params = {'C': 1.0,
-                      'dual': 'false',
                       'max_iter': -1}
-        return cls(LinearSVC(**params))
+        return cls(LinearSVC())
 
 
 class GridSearch():
     """Tool to search and image with a sliding window approach."""
-    def __init__(self, search_windows, search_areas, hog_params,
+    def __init__(self, search_windows, search_areas, image_analyser,
                  training_resolution=64):
         self.search_areas = search_areas
-        self.search_windows = self.process_windows(search_windows)
-        self.frame = ImageFrame(hog_params)
+        self.search_windows = search_windows
+        self.image_analyser = image_analyser
         self.training_res = training_resolution
+        self.pix_in_cell = image_analyser.hog_params['pix_per_cell']
         self.crawl_result = None
 
-    def process_windows(self, search_windows):
-        """Resizes the steps to ensure consistency with the search area."""
+    def  get_nsteps(self, search_window):
+        """Get the total number of steps for a search window."""
+        steps_x = self.get_steps(search_window, 'x')
+        steps_y = self.get_steps(search_window, 'y')
 
-        total_steps = 0
+        if steps_x - int(steps_x) != 0:
+            print('Please ensure that your steps in x are set up such that the'
+                  + ' search fits perfectly into the search area "'
+                  + search_window['search_area'] + '".')
+            print(steps_x)
+        if steps_y - int(steps_y) != 0:
+            print('Please ensure that your steps in y are set up such that the'
+                  + ' search fits perfectly into the search area "'
+                  + search_window['search_area'] + '".')
+            print(steps_y)
 
-        for name, window in search_windows.items():
-            area = self.search_areas[window['search_area']]
-            area_width = (area[1][0] - area[0][0])
-            area_height = (area[1][1] - area[0][1])
+        return int(steps_x) * int(steps_y)
 
-            steps_x = int(math.ceil((area_width - window['size'][0])
-                          / window['step_x']))
-            window['step_x'] = int(math.ceil((area_width - window['size'][0])
-                                   / steps_x))
-            steps_y = int(math.ceil((area_height - window['size'][1])
-                          / window['step_y']))
-            window['step_y'] = int(math.ceil((area_height - window['size'][1])
-                                   / steps_y))
+    def get_steps(self, search_window, direction):
+        """Get the number of steps for a search window along a direction."""
+        i = 0 if direction == 'x' else 1
+        area = self.search_areas[search_window['search_area']]
+        window_length = search_window['size'][i]
+        area_length = area[1][i] - area[0][i]
+        return ((area_length - window_length) 
+                / search_window['step_' + direction])
 
-            search_windows[name] = window
-            total_steps += (steps_x) * (steps_y)
-
-        print('With the current search window and area setup, each frame ' + \
-              'will be sampled', total_steps, 'times.')
-        return search_windows
-
-    def get_window_position(self, step_number, window):
+    def get_window_position(self, step, window):
         """Get the absolute position of the window based on the step number as
-        a fraction of the image dimensions
+        in image cell dimensions.
         """
-        top = self.search_areas[window['search-area']][0][1]
-        left = self.search_areas[window['search-area']][0][0]
-        area = self.search_areas[window['search_area']]
-        area_width = (area[0][0] - area[1][0])
+        (left, top), _ = self.get_relative_window_coordinates(window, step)
+        scale_factor = ((self.pix_in_cell * window['size'][0])
+                        / self.training_res)
+        left, top = (int(left * scale_factor),
+                     int(top * scale_factor))
 
-        steps_x = int(area_width / window['step_x'])
+        search_area = self.search_areas[window['search_area']]
+        top_offset = search_area[0][1]
+        left_offset = search_area[0][0]
 
-        top_offset = int(step_number / steps_x) * window['step_y']
-        left_offset = int(step_number % steps_x) * window['step_x']
+        return ((left + left_offset), 
+                (top + top_offset))
 
-        return (left + left_offset), (top + top_offset)
-
-    def set_frame_image(self, img):
+    def update_image_analyser(self, img, window):
         """Update the image frames with the supplied image."""
-        if self.frame is None:
-            raise ValueError('No image frame objects exist.')
+        if self.image_analyser is None:
+            raise ValueError('No image analyser object exists.')
         else:
-            std_size = (self.training_res, self.training_res)
-            img = cv2.resize(img, std_size)
-            return self.frame(img)
+            area_of_interest = self.search_areas[window['search_area']]
+            area_of_interest = self.convert_to_px(area_of_interest)
+            img_new = get_area_of_interest(img, area_of_interest)
+            window_size = window['size'][0] * self.pix_in_cell
+            scale_factor = self.training_res / window_size
+            new_size = (int(img_new.shape[1] * scale_factor), 
+                        int(img_new.shape[0] * scale_factor))
+            img = cv2.resize(img_new, new_size)
+            plot_image(img)
+            plt.show()
 
-    def crawl_image(self, img, classifier, highlight=True):
-        """Calls a function for each step while crawling over the input image.
+            return self.image_analyser(img)
+    
+    def convert_to_px(self, coordinates):
+        """Converts coordinates expressed in cells to pixels."""
+        converted = []
+        for entry in coordinates:
+            if type(entry) is list or type(entry) is tuple:
+                converted_entry = self.convert_to_px(entry)
+            else:
+                converted_entry = entry * self.pix_in_cell
+            converted.append(converted_entry)
+        return converted
 
-        The input image is sampled based on the supplied search window
-        parameters and the supplied callback function is applied for each step.
-
-        Returns
-        --------
-        dict: Containing two entries - 'position' with the search window
-        position, 'output' with the result from what the callback function
-        returns for each step.
-        """
-        search_result = []
+    def sliding_search(self, img, classifier):
+        """Returns a list of windows where a vehicle was found."""
+        windows_with_vehicles = []
+        analyser = self.image_analyser
         
         for name, window in self.search_windows.items():
-            lowest = self.search_areas[window['search_area']][1][1]
-            rightmost = self.search_areas[window['search_area']][1][0]
-            top = self.search_areas[window['search_area']][0][1]
-            bottom = top + window['step_y']
-            right = 0
+            n_steps = self.get_nsteps(window)
+            self.update_image_analyser(img, window)
 
-            while bottom < lowest - 1:
-                left = self.search_areas[window['search_area']][0][0]
-                while right < rightmost - 1:
-                    left += min(window['step_x'], rightmost - right)
-                    right = left + window['size'][0]
+            print(name)
 
-                    window_area = ((left, top), (right, bottom))
-                    window_img = get_area_of_interest(img, window_area)
-                    self.set_frame_image(window_img)
-                    frame = self.frame
-                    features = [np.concatenate((frame.get_hog_features(),
-                                                frame.get_color_bin_features()))]
+            for step in range(n_steps):
+                position = self.get_window_position(step, window)
+                position = self.convert_to_px(position)
+                
+                window_relative = self.get_relative_window_coordinates(window,
+                                                                       step)
+                features = analyser.get_image_features(window=window_relative)
+                label = classifier.predict(features.reshape(1, -1))[0]
 
-                    search = {}
-                    search['position'] = (left, top)
-                    search['window'] = name
-                    search['label'] = classifier.predict(features)[0]
+                if label == 'vehicles':
+                    windows_with_vehicles.append({'position': position,
+                                                  'label': label,
+                                                  'window': name})
 
-                    search_result.append(search)
+        return windows_with_vehicles
 
-                right = 0
-                top += min(window['step_y'], lowest - bottom)
-                bottom = top + window['size'][1]
-            print(name, bottom, lowest)
+    def get_relative_window_coordinates(self, window, step):
+        """Returns window coordinates in scaled cells (based on training 
+        resolution) relative to scaled area of interest.
+        """
+        steps_x = self.get_steps(window, 'x')
+        step_x = int(step % steps_x)
+        step_y = int(step / steps_x)
+        training_res_cells = int(self.training_res / self.pix_in_cell)
 
+        scaled_x_step = int(window['step_x'] / window['size'][0]
+                            * training_res_cells)
+        scaled_y_step = int(window['step_y'] / window['size'][0]
+                            * training_res_cells)
 
-        if highlight:
-            highlighted_cars = self.highlight_labels(img, search_result,
-                                                     'vehicles')
-            return search_result, highlighted_cars
-        else:
-            return search_result
+        left = scaled_x_step * step_x
+        top = scaled_y_step * step_y
 
-    def highlight_labels(self, img, search_result, target_label,
-                         color='yellow'):
-        """Draws a rectangle around windows which detected a given label."""
+        return ((left, top), 
+                (left + training_res_cells, top + training_res_cells))
+
+    def highlight_windows(self, img, search_results, color='yellow'):
+        """Draws a rectangle around windows in the search result."""
         annotated_img = np.copy(img)
-        for step in search_result:
-            if step['label'] == target_label:
-                window_area = self.get_window_area(step['position'],
-                                                   step['window'])
-                annotated_img = quick_rectangle(annotated_img, window_area,
-                                                color=color, opacity=0.4,
-                                                filled=True, thickness=2)
+        for result in search_results:
+            window = self.search_windows[result['window']]
+            window_dimensions = self.convert_to_px(window['size'])
+            width, height = (window_dimensions[0], window_dimensions[1])
+            left, top = result['position']
+            window_area = [(left, top), (left + width, 
+                                         top + height)]
+            
+            annotated_img = quick_rectangle(annotated_img, window_area,
+                                            color=color, opacity=0.4,
+                                            filled=True, thickness=2)
 
         return annotated_img
-
-    def get_window_area(self, top_left_crnr, window_name):
-        """Returns the  coordinates of the search window in pixels."""
-        height = self.search_windows[window_name]['size'][1]
-        width = self.search_windows[window_name]['size'][0]
-        left = top_left_crnr[0]
-        top = top_left_crnr[1]
-        right = left + width
-        bottom = top + height
-
-        return (top_left_crnr, (right, bottom))
 
 
 #-----------------------------------------------------------------------------#
@@ -476,7 +556,7 @@ def overlay_image(img, overlay_img, opacity=1.0):
 
     return img_out.astype('uint8')
 
-def quick_rectangle(img, corners, color='green', opacity=0.9, 
+def quick_rectangle(img, corners, color='green', opacity=0.9,
                     thickness=4, filled=False):
     """Draws a rectangle on the input image."""
     colors = {'green': (30, 255, 120),
@@ -505,3 +585,38 @@ def quick_rectangle(img, corners, color='green', opacity=0.9,
         img = overlay_image(img, fill, opacity=opacity*0.3)
 
     return overlay_image(img, outline, opacity=opacity)
+
+def save_image(image, output_folder='./output_images/',
+               name='Current_Image', colorspace='RGB'):
+    """Save image to a file."""
+    save_path = os.path.join(output_folder, name) + '.jpg'
+
+    if colorspace != 'RGB':
+        converter = getattr(cv2, "COLOR_" + colorspace + "2RGB")
+        image = cv2.cvtColor(image, converter)
+
+    cv2.imwrite(save_path, image)
+
+def plot_histogram(values, chart_title, series_labels):
+    """Plots the supplied colour histogram as a barchart."""
+    x = np.arange(0, 260, 260/len(values[0]))
+    n_series = len(series_labels)
+    colors = [[0.88, 0.75, 0.35, 0.7],
+              [0.75, 0.63, 0.25, 0.7],
+              [0.60, 0.47, 0.10, 0.7]]
+
+    plt.subplots(1, n_series, figsize=(10, 3), dpi=120)
+    plt.title(chart_title)
+
+    if n_series > 1:
+        assert n_series == len(values), "Supplied data series must have corresponding labels."
+        width =  260/len(values[0])
+        for i, series_label in enumerate(series_labels):
+            plt.subplot(1, n_series, i+1)
+            plt.bar(x, values[i][:], width, color=colors[i], label=series_label)
+            plt.legend(loc='best')
+            plt.xlim(0, 256)
+    else:
+        plt.bar(x, values, align='center', alpha=0.5)
+    
+    plt.show()
