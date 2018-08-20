@@ -92,8 +92,8 @@ def save_image(image, output_folder='./output_images/',
     """Save image to a file."""
     save_path = os.path.join(output_folder, name) + '.jpg'
 
-    if colorspace != 'RGB':
-        converter = getattr(cv2, "COLOR_" + colorspace + "2RGB")
+    if colorspace != 'BGR':
+        converter = getattr(cv2, "COLOR_" + colorspace + "2BGR")
         image = cv2.cvtColor(image, converter)
 
     cv2.imwrite(save_path, image)

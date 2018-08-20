@@ -22,7 +22,7 @@ class ImageAnalyser():
     def __call__(self, image):
         self.set_image(image)
         if self.hog_params['visualise']:
-            self.hog_features, self.hog_image = \
+            self.hog_features, self.hog_images = \
                                                 self.extract_hog_features()
         else:
             self.hog_features = self.extract_hog_features()
@@ -52,21 +52,44 @@ class ImageAnalyser():
         interest of the current image.
         """
         img = self.image
-        if self.colorspace != 'RGB':
-            converter = getattr(cv2, "COLOR_" + self.colorspace + "2RGB")
-            img = cv2.cvtColor(img, converter)
-        img = cv2.cvtColor(self.image, cv2.COLOR_RGB2GRAY)
         orient = self.hog_params['orientations']
         pix_per_cell = self.hog_params['pix_per_cell']
         cell_per_block = self.hog_params['cell_per_block']
         visualise = self.hog_params['visualise']
 
-        return hog(img,
-                   orientations=orient,
-                   pixels_per_cell=(pix_per_cell, pix_per_cell),
-                   cells_per_block=(cell_per_block, cell_per_block),
-                   visualise=visualise, block_norm='L2-Hys',
-                   feature_vector=False)
+        channels = img.shape[2]
+        hog_features = []
+        hog_images = []
+
+        if visualise:
+            for i in range(channels):
+                features, image = hog(img[:, :, i],
+                                      orientations=orient,
+                                      pixels_per_cell=(pix_per_cell,
+                                                       pix_per_cell),
+                                      cells_per_block=(cell_per_block,
+                                                       cell_per_block),
+                                      visualise=visualise,
+                                      block_norm='L2-Hys',
+                                      feature_vector=False)
+                hog_features.append(features)
+                hog_images.append(image)
+            result = (np.array(hog_features), hog_images)
+        else:
+            for i in range(channels):
+                features = hog(img[:, :, i],
+                               orientations=orient,
+                               pixels_per_cell=(pix_per_cell,
+                                                pix_per_cell),
+                               cells_per_block=(cell_per_block,
+                                                cell_per_block),
+                               visualise=visualise,
+                               block_norm='L2-Hys',
+                               feature_vector=False)
+                hog_features.append(features)
+            result = (np.array(hog_features))
+
+        return result
 
     def get_hog_features(self, window=None):
         """Returns the Histogram of Oriented Gradients """
@@ -74,13 +97,18 @@ class ImageAnalyser():
             raise ValueError('There are no HOG features available.')
         else:
             if window is not None:
-                window_size = window[1][0] - window[0][0]
-                cells_block = self.hog_params['cell_per_block']
-                blocks_per_window = window_size - cells_block + 1
-                hog_sample = self.hog_features[window[0][1]: window[0][1]
-                                               + blocks_per_window,
-                                               window[1][1]: window[1][1]
-                                               + blocks_per_window]
+                channels = self.image.shape[2]
+                hog_sample = []
+                for i in range(channels):
+                    window_size = window[1][0] - window[0][0]
+                    cells_block = self.hog_params['cell_per_block']
+                    blocks_per_window = window_size - cells_block + 1
+                    features = self.hog_features[i][window[0][1]: window[0][1]
+                                                    + blocks_per_window,
+                                                    window[1][1]: window[1][1]
+                                                    + blocks_per_window]
+                    hog_sample.append(features)
+                hog_sample = np.array(hog_sample)
             else:
                 hog_sample = self.hog_features
 
@@ -114,7 +142,6 @@ class ImageAnalyser():
         if window is not None:
             pix_per_cell = self.hog_params['pix_per_cell']
             top = window[0][1] * pix_per_cell
-            #print(window)
             bottom = window[1][1] * pix_per_cell
             left = window[0][0] * pix_per_cell
             right = window[1][0] * pix_per_cell
@@ -160,10 +187,11 @@ class ImageAnalyser():
 
     def get_hog_visualisation(self):
         """Returns the Histogram of Oriented Gradients """
-        if self.hog_image is None:
+        if self.hog_images is None:
             raise ValueError('There is no HOG visualisation available.')
         else:
-            return self.hog_image
+            print(self.hog_features.shape)
+            return self.hog_images
 
     def get_histogram_visualisation(self, window=None):
         """Plot the histogram for the current window."""

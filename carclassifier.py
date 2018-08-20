@@ -64,4 +64,3 @@ class Classifier():
             params = {'C': 1.0,
                       'dual': True}
         return cls(LinearSVC(**params))
-
