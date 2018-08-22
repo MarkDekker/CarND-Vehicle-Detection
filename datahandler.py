@@ -66,7 +66,7 @@ class TrainingData():
             self.training_set_features[label] = []
             for image in images:
                 image_analyser(image)
-                features = image_analyser.get_image_features(
+                features = image_analyser.get_image_features(window=((0, 0), (8, 8)),
                                                     hog_features=hog_features,
                                                     spatial=spatial,
                                                     histograms=histograms)

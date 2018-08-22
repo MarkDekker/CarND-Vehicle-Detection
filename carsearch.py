@@ -3,7 +3,7 @@
 import numpy as np
 import cv2
 
-from utilityfun import quick_rectangle #project utility
+from utilityfun import *#quick_rectangle #project utility
 
 class GridSearch():
     """Tool to search and image with a sliding window approach."""
@@ -20,6 +20,9 @@ class GridSearch():
         """Get the total number of steps for a search window."""
         steps_x = self.get_steps(search_window, 'x')
         steps_y = self.get_steps(search_window, 'y')
+
+        print(search_window['search_area'], 'steps x:', steps_x)
+        print(search_window['search_area'], 'steps y:', steps_y)
 
         if steps_x - int(steps_x) != 0:
             print('Please ensure that your steps in x are set up such that the'
@@ -92,6 +95,8 @@ class GridSearch():
         windows_with_vehicles = []
         analyser = self.image_analyser
 
+        save_later = []
+
         for name, window in self.search_windows.items():
             n_steps = self.get_nsteps(window)
             self.update_image_analyser(img, window)
@@ -104,6 +109,16 @@ class GridSearch():
                                                                        step)
                 features = analyser.get_image_features(window=window_relative)
                 label = classifier.predict(features.reshape(1, -1))[0]
+
+                ### Temp Image Export for Debugging ###
+                aoi_window = self.convert_to_px(window_relative)
+                image = self.get_area_of_interest(analyser.get_image(),
+                                                  aoi_window)
+                file_name = 'Test_' + name + '_' + str(step) + '_' + label
+                save_later.append([image, file_name])
+                save_image(image, name=file_name)
+
+                #######################################
 
                 if label == 'vehicles':
                     windows_with_vehicles.append({'position': position,
@@ -121,13 +136,15 @@ class GridSearch():
         step_y = int(step / steps_x)
         training_res_cells = int(self.training_res / self.pix_in_cell)
 
-        scaled_x_step = int(window['step_x'] / window['size'][0]
-                            * training_res_cells)
-        scaled_y_step = int(window['step_y'] / window['size'][0]
-                            * training_res_cells)
+        scaled_x_step = (window['step_x'] / window['size'][0]
+                         * training_res_cells)
+        scaled_y_step = (window['step_y'] / window['size'][0]
+                         * training_res_cells)
 
-        left = scaled_x_step * step_x
-        top = scaled_y_step * step_y
+        left = int(scaled_x_step * step_x)
+        top = int(scaled_y_step * step_y)
+
+        #print(step, left, top)
 
         return ((left, top),
                 (left + training_res_cells, top + training_res_cells))

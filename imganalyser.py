@@ -15,7 +15,7 @@ class ImageAnalyser():
         self.image = None
         self.hog_params = hog_parameters
         self.hog_features = None
-        self.hog_image = None
+        self.hog_images = None
         self.spatial_size = spatial_size
         self.histogram_bins = histogram_bins
 
@@ -105,12 +105,17 @@ class ImageAnalyser():
                     blocks_per_window = window_size - cells_block + 1
                     features = self.hog_features[i][window[0][1]: window[0][1]
                                                     + blocks_per_window,
-                                                    window[1][1]: window[1][1]
+                                                    window[0][0]: window[0][0]
                                                     + blocks_per_window]
                     hog_sample.append(features)
                 hog_sample = np.array(hog_sample)
             else:
-                hog_sample = self.hog_features
+                channels = self.image.shape[2]
+                hog_sample = []
+                for i in range(channels):
+                    features = self.hog_features[i]
+                    hog_sample.append(features)
+                hog_sample = np.array(hog_sample)
 
             return hog_sample
     def get_spatial_features(self, window=None):
@@ -190,7 +195,6 @@ class ImageAnalyser():
         if self.hog_images is None:
             raise ValueError('There is no HOG visualisation available.')
         else:
-            print(self.hog_features.shape)
             return self.hog_images
 
     def get_histogram_visualisation(self, window=None):
