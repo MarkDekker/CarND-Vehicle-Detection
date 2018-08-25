@@ -43,6 +43,8 @@ def overlay_image(img, overlay_img, opacity=1.0):
     """
     if len(img.shape) < 3:
         img = np.stack((img, img, img), axis=-1)
+    if len(overlay_img.shape) < 3:
+        overlay_img = np.stack((overlay_img, overlay_img, overlay_img), axis=-1)
 
     img_out = np.zeros(img.shape)
     overlay_img = (overlay_img * opacity).astype(int)
