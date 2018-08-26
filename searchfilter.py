@@ -24,14 +24,28 @@ class SearchFilter():
         if self.detected_cars is not None:
             for car in self.detected_cars:
                 car['status'] = 'previous'
+            self.precondition_hitmap()
         self.log_search(search)
         self.filter(threshold=threshold)
         self.remove_old_cars()
-        self.hitmap = self.hitmap * 0.4
 
     def reset(self):
         """Resets the filter for a new search."""
         self.hitmap = np.zeros(self.hitmap_shape)
+
+    def precondition_hitmap(self):
+        """Preactivates the hitmap based on where cars were detected previously.
+        """
+        self.hitmap = np.zeros(self.hitmap.shape)
+        hitmap_channels = self.hitmap.shape[2]
+
+        for i in range(hitmap_channels):
+            for car in self.detected_cars:
+                top = car['box'][0][1] - 8
+                bottom = car['box'][1][1] + 8
+                left = car['box'][0][0] - 8
+                right = car['box'][1][0] + 8
+                self.hitmap[top:bottom, left:right, i] = 1
 
     def get_hitmap_shape(self, image, n_windows):
         """Defines the shape of the hitmap array.
@@ -51,32 +65,42 @@ class SearchFilter():
         """Logs the pixels for which the search returned a hit."""
 
         windows = self.search_windows
+        new_hitmap = np.zeros(self.hitmap.shape)
 
         for result in search:
             left = result['position'][0]
             top = result['position'][1]
             width = windows[result['window']]['size'][0] * 8
             height = windows[result['window']]['size'][1] * 8
+            n_windows = len(list(windows.keys())) 
             i = list(windows.keys()).index(result['window'])
 
-            self.hitmap[top:(top + height), left:(left + width), i] += 1
-            self.hitmap[top:(top + height), left:(left + width), -1] += 1
+            box_old_hitmap = self.hitmap[top:(top + height),
+                                         left:(left + width), i]
+            box_new_hitmap = new_hitmap[top:(top + height),
+                                        left:(left + width), i]
+            box_new_hitmap += (box_old_hitmap * 2 + 1) * 1
+            box_old_hitmap = self.hitmap[top:(top + height),
+                                         left:(left + width), -1]
+            box_new_hitmap = new_hitmap[top:(top + height),
+                                        left:(left + width), -1]
+            box_new_hitmap += (box_old_hitmap * 2 + 1) * n_windows / (i + 1)
+
+        self.hitmap = new_hitmap
 
     def visualise_hitmap(self, hitmap_channel=-1):
         """Plot hitmap as heatmap on top of image."""
         hitmap_img = self.hitmap[:, :, hitmap_channel]
         overlay_cmap = transparent_cmap(plt.cm.get_cmap('plasma'))
-        plt.figure(figsize=(12, 7))
         plot_image(self.image)
-        plt.imshow(hitmap_img, cmap=overlay_cmap)
-        plt.colorbar()
-        plt.show()
-        
+        hitmap_plot = plt.imshow(hitmap_img, cmap=overlay_cmap)
+        plt.colorbar(hitmap_plot, fraction=0.026, pad=0.04)
+        plt.clim(0, 10)
 
-    def filter(self, threshold=2):
+    def filter(self, threshold=2, hitmap_channel=-1):
         """Filter the search hits based on a threshold value."""
         thresholded = np.where(self.hitmap > threshold, self.hitmap, 0)
-        labels = label(thresholded)
+        labels = label(thresholded[:, :, hitmap_channel])
         boxes = self.get_bounding_boxes(labels)
 
         for box in boxes:
@@ -109,10 +133,11 @@ class SearchFilter():
         updated = False
         if self.detected_cars is not None:
             for car in self.detected_cars:
-                if self.get_distance(centroid, car['centroid']) < radius:
+                if (self.get_distance(centroid, car['centroid']) < radius
+                        and car['status'] != 'current'):
                     car['box'] = box
                     car['velocity'] = (centroid[0] - car['centroid'][0],
-                                    centroid[1] - car['centroid'][1])
+                                       centroid[1] - car['centroid'][1])
                     car['centroid'] = centroid
                     car['status'] = 'current'
                     updated = True
@@ -145,13 +170,13 @@ class SearchFilter():
     def plot_detected_cars(self, color='yellow'):
         """Draws rectangles around the cars that were detected."""
         annotated_img = np.copy(self.image)
-        for car in self.detected_cars:
-            window_area = car['box']
-            annotated_img = quick_rectangle(annotated_img, window_area,
-                                            color=color, opacity=0.6,
-                                            filled=True, thickness=2)
-        plot_image(annotated_img)
-        plt.show()
+        if self.detected_cars is not None:
+            for car in self.detected_cars:
+                window_area = car['box']
+                annotated_img = quick_rectangle(annotated_img, window_area,
+                                                color=color, opacity=0.8,
+                                                filled=True, thickness=2)
+        return annotated_img
 
 
 # --------------------------------------------------------------------------- #
@@ -161,5 +186,5 @@ def transparent_cmap(cmap):
 
     alpha_cmap = cmap
     alpha_cmap._init()
-    alpha_cmap._lut[:, -1] = np.linspace(0, 0.8, 259)
+    alpha_cmap._lut[:, -1] = np.hstack(([0], np.linspace(0.3, 0.9, 258)))
     return alpha_cmap
