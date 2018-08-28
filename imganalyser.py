@@ -4,6 +4,7 @@ import numpy as np
 import cv2
 from skimage.feature import hog
 import matplotlib.pyplot as plt
+from utilityfun import *
 
 class ImageAnalyser():
     """Holds all of the information related to the current image under
@@ -71,6 +72,7 @@ class ImageAnalyser():
                                                        cell_per_block),
                                       visualise=visualise,
                                       block_norm='L2-Hys',
+                                      transform_sqrt=False, 
                                       feature_vector=False)
                 hog_features.append(features)
                 hog_images.append(image)
@@ -85,6 +87,7 @@ class ImageAnalyser():
                                                 cell_per_block),
                                visualise=visualise,
                                block_norm='L2-Hys',
+                               transform_sqrt=False, 
                                feature_vector=False)
                 hog_features.append(features)
             result = (np.array(hog_features))

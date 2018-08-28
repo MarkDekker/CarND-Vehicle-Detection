@@ -1,6 +1,7 @@
 """Module to filter searches for unwanted results."""
 
 import numpy as np
+import cv2
 import matplotlib.pyplot as plt
 from scipy.ndimage.measurements import label
 from utilityfun import plot_image, quick_rectangle
@@ -36,16 +37,19 @@ class SearchFilter():
     def precondition_hitmap(self):
         """Preactivates the hitmap based on where cars were detected previously.
         """
-        self.hitmap = np.zeros(self.hitmap.shape)
-        hitmap_channels = self.hitmap.shape[2]
+        self.hitmap = self.hitmap * 0.7
 
-        for i in range(hitmap_channels):
-            for car in self.detected_cars:
-                top = car['box'][0][1] - 8
-                bottom = car['box'][1][1] + 8
-                left = car['box'][0][0] - 8
-                right = car['box'][1][0] + 8
-                self.hitmap[top:bottom, left:right, i] = 1
+    def dilate_and_threshold(self, hitmap, high_thresh, low_thresh, radius=100):
+        """Takes a high threshold, selects a larger area around it based on
+        radius and then applies a lower threshold.
+        """
+
+        kernel = np.ones((radius, radius), np.uint8)
+        hitmap_high_thresh = np.where(hitmap > high_thresh, 1, 0).astype('uint8')
+        dilated = cv2.dilate(hitmap_high_thresh, kernel, iterations=1)
+        hitmap_dilated_thresh = np.where(dilated > 0, hitmap, 0)
+
+        return np.where(hitmap_dilated_thresh > low_thresh, hitmap, 0)
 
     def get_hitmap_shape(self, image, n_windows):
         """Defines the shape of the hitmap array.
@@ -65,28 +69,22 @@ class SearchFilter():
         """Logs the pixels for which the search returned a hit."""
 
         windows = self.search_windows
-        new_hitmap = np.zeros(self.hitmap.shape)
 
         for result in search:
             left = result['position'][0]
             top = result['position'][1]
             width = windows[result['window']]['size'][0] * 8
             height = windows[result['window']]['size'][1] * 8
-            n_windows = len(list(windows.keys())) 
+            n_windows = len(list(windows.keys()))
             i = list(windows.keys()).index(result['window'])
 
-            box_old_hitmap = self.hitmap[top:(top + height),
-                                         left:(left + width), i]
-            box_new_hitmap = new_hitmap[top:(top + height),
-                                        left:(left + width), i]
-            box_new_hitmap += (box_old_hitmap * 2 + 1) * 1
-            box_old_hitmap = self.hitmap[top:(top + height),
-                                         left:(left + width), -1]
-            box_new_hitmap = new_hitmap[top:(top + height),
-                                        left:(left + width), -1]
-            box_new_hitmap += (box_old_hitmap * 2 + 1) * n_windows / (i + 1)
+            box_hitmap = self.hitmap[top:(top + height),
+                                     left:(left + width), i]
+            box_hitmap += 0.3
+            box_hitmap = self.hitmap[top:(top + height),
+                                     left:(left + width), -1]
+            box_hitmap += 0.3 * n_windows / (i + 1)
 
-        self.hitmap = new_hitmap
 
     def visualise_hitmap(self, hitmap_channel=-1):
         """Plot hitmap as heatmap on top of image."""
@@ -95,11 +93,13 @@ class SearchFilter():
         plot_image(self.image)
         hitmap_plot = plt.imshow(hitmap_img, cmap=overlay_cmap)
         plt.colorbar(hitmap_plot, fraction=0.026, pad=0.04)
-        plt.clim(0, 10)
+        plt.clim(0, 20)
 
     def filter(self, threshold=2, hitmap_channel=-1):
         """Filter the search hits based on a threshold value."""
-        thresholded = np.where(self.hitmap > threshold, self.hitmap, 0)
+        #thresholded = np.where(self.hitmap > threshold, self.hitmap, 0)
+        thresholded = self.dilate_and_threshold(self.hitmap, 15, threshold)
+        #self.hitmap = thresholded
         labels = label(thresholded[:, :, hitmap_channel])
         boxes = self.get_bounding_boxes(labels)
 

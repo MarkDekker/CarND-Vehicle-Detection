@@ -3,7 +3,7 @@
 import numpy as np
 import cv2
 
-from utilityfun import quick_rectangle #project utility
+from utilityfun import * #quick_rectangle #project utility
 
 class GridSearch():
     """Tool to search and image with a sliding window approach."""
@@ -104,6 +104,11 @@ class GridSearch():
                                                                        step)
                 features = analyser.get_image_features(window=window_relative)
                 label = classifier.predict(features.reshape(1, -1))[0]
+
+                # current_window = (position, (position[0] + 8 * window['size'][0],
+                #                              position[1] + 8 * window['size'][1]))
+                # window_name = "temp_" + name + "_" + str(step)
+                # #save_image(self.get_area_of_interest(img, current_window), name=window_name)
 
                 if label == 'vehicles':
                     windows_with_vehicles.append({'position': position,
