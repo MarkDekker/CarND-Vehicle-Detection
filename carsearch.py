@@ -41,7 +41,7 @@ class GridSearch():
         window_length = search_window['size'][i]
         area_length = area[1][i] - area[0][i]
         return ((area_length - window_length)
-                / search_window['step_' + direction])
+                / search_window['step_' + direction]) + 1
 
     def get_window_position(self, step, window):
         """Get the absolute position of the window based on the step number as
