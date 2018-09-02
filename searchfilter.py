@@ -46,6 +46,7 @@ class SearchFilter():
 
         kernel = np.ones((radius, radius), np.uint8)
         hitmap_high_thresh = np.where(hitmap > high_thresh, 1, 0).astype('uint8')
+        self.hitmap += hitmap_high_thresh * 0.3
         dilated = cv2.dilate(hitmap_high_thresh, kernel, iterations=1)
         hitmap_dilated_thresh = np.where(dilated > 0, hitmap, 0)
         #self.hitmap = hitmap_dilated_thresh
@@ -78,7 +79,7 @@ class SearchFilter():
             top = result['position'][1]
             width = windows[result['window']]['size'][0] * 8
             height = windows[result['window']]['size'][1] * 8
-            #n_windows = len(list(windows.keys()))
+            n_windows = len(list(windows.keys()))
             i = list(windows.keys()).index(result['window'])
 
             box_hitmap = self.hitmap[top:(top + height),
@@ -86,7 +87,7 @@ class SearchFilter():
             box_hitmap += factor
             box_hitmap = self.hitmap[top:(top + height),
                                      left:(left + width), -1]
-            box_hitmap += factor #* n_windows / (i + 1)
+            box_hitmap += factor * n_windows / (i + 1)
 
 
     def visualise_hitmap(self, hitmap_channel=-1):
@@ -96,13 +97,11 @@ class SearchFilter():
         plot_image(self.image)
         hitmap_plot = plt.imshow(hitmap_img, cmap=overlay_cmap)
         plt.colorbar(hitmap_plot, fraction=0.026, pad=0.04)
-        plt.clim(0, 15)
+        plt.clim(0, 20)
 
     def filter(self, threshold=2, hitmap_channel=-1):
         """Filter the search hits based on a threshold value."""
-        #thresholded = np.where(self.hitmap > threshold, self.hitmap, 0)
         thresholded = self.dilate_and_threshold(self.hitmap, 12, threshold)
-        #self.hitmap = thresholded
         labels = label(thresholded[:, :, hitmap_channel])
         boxes = self.get_bounding_boxes(labels)
 
